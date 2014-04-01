@@ -1,15 +1,14 @@
 import java.io.BufferedReader;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 import org.apache.oltu.oauth2.client.OAuthClient;
 import org.apache.oltu.oauth2.client.URLConnectionClient;
 import org.apache.oltu.oauth2.client.request.OAuthBearerClientRequest;
 import org.apache.oltu.oauth2.client.request.OAuthClientRequest;
-import org.apache.oltu.oauth2.client.response.OAuthAccessTokenResponse;
 import org.apache.oltu.oauth2.client.response.OAuthJSONAccessTokenResponse;
 import org.apache.oltu.oauth2.client.response.OAuthResourceResponse;
 import org.apache.oltu.oauth2.common.OAuth;
@@ -22,21 +21,22 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-
 
 public class OAuth2Client {
 	
-	private String clientSecretsFile;
-	private String storedCredsFile;
-	private Options options;
+	private final String storedCredsFile;
+	private final Options options;
+	private final String userAgent;
 	
 	public OAuth2Client(String clientSecretsFile, String storedCredsFile) throws JSONException, IOException {
-		this.clientSecretsFile = clientSecretsFile;
 		this.storedCredsFile = storedCredsFile;
 		this.options = ReadClientSecrets(clientSecretsFile);
+		this.userAgent = "VersionOne.OAuth2.OLTU.Client/1.0";
+	}
+	public OAuth2Client(String clientSecretsFile, String storedCredsFile, String userAgent) throws JSONException, IOException {
+		this.storedCredsFile = storedCredsFile;
+		this.options = ReadClientSecrets(clientSecretsFile);
+		this.userAgent = userAgent;
 	}
 	
 	public static OAuthClient oAuthClient = new OAuthClient(new URLConnectionClient());
@@ -111,12 +111,25 @@ public class OAuth2Client {
         }
     
     
-    public OAuthResourceResponse TryHttp(OAuthToken creds, String path) throws OAuthSystemException, OAuthProblemException {
+    public OAuthResourceResponse TryGet(OAuthToken creds, String path) throws OAuthSystemException, OAuthProblemException {
     	OAuthClientRequest bearerClientRequest =
     		new OAuthBearerClientRequest(path)
   	        	.setAccessToken(creds.getAccessToken())
   	        	.buildHeaderMessage();
+    	bearerClientRequest.setHeader("User-Agent", userAgent);
     	OAuthResourceResponse resp =  oAuthClient.resource(bearerClientRequest, OAuth.HttpMethod.GET, OAuthResourceResponse.class);
+    	return resp;
+    }
+    
+    
+    public OAuthResourceResponse TryPost(OAuthToken creds, String path, String body) throws OAuthSystemException, OAuthProblemException {
+    	OAuthClientRequest bearerClientRequest =
+    		new OAuthBearerClientRequest(path)
+  	        	.setAccessToken(creds.getAccessToken())
+  	        	.buildHeaderMessage();
+    	bearerClientRequest.setBody(body);
+    	bearerClientRequest.setHeader("User-Agent", userAgent);
+    	OAuthResourceResponse resp =  oAuthClient.resource(bearerClientRequest, OAuth.HttpMethod.POST, OAuthResourceResponse.class);
     	return resp;
     }
     
@@ -134,7 +147,7 @@ public class OAuth2Client {
      * @throws UnsupportedEncodingException 
      */
     public OAuthResourceResponse GetHttp(OAuthToken creds, String path) throws OAuthSystemException, OAuthProblemException, UnsupportedEncodingException, IOException {
-    	OAuthResourceResponse resp = TryHttp(creds, path);
+    	OAuthResourceResponse resp = TryGet(creds, path);
     	if(resp.getResponseCode() != 401) {
     		return resp;
     	} else {
@@ -148,7 +161,25 @@ public class OAuth2Client {
 				.buildBodyMessage();
     		OAuthToken newCreds = oAuthClient.accessToken(request).getOAuthToken();
     		WriteTokenToStoredCreds(newCreds);
-    		return TryHttp(newCreds, path);
+    		return TryGet(newCreds, path);
+    	}
+	}
+    public OAuthResourceResponse PostHttp(OAuthToken creds, String path, String body) throws OAuthSystemException, OAuthProblemException, UnsupportedEncodingException, IOException {
+    	OAuthResourceResponse resp = TryPost(creds, path, body);
+    	if(resp.getResponseCode() != 401) {
+    		return resp;
+    	} else {
+    		OAuthClientRequest request = OAuthClientRequest
+				.tokenLocation(options.TokenUrl)
+				.setGrantType(GrantType.REFRESH_TOKEN)
+				.setClientId(options.ClientId)
+				.setClientSecret(options.ClientSecret)
+				.setRedirectURI(options.RedirectUrl)
+				.setRefreshToken(creds.getRefreshToken())
+				.buildBodyMessage();
+    		OAuthToken newCreds = oAuthClient.accessToken(request).getOAuthToken();
+    		WriteTokenToStoredCreds(newCreds);
+    		return TryPost(creds, path, body);
     	}
 	}
     	
@@ -165,7 +196,4 @@ public class OAuth2Client {
 				);
 	}
 
-	
-	
-	
 }
